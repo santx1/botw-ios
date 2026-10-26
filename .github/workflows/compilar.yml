@@ -1,4 +1,4 @@
-name: Compilar BotW iOS
+name: Extraer Solo RomFS 15GB
 
 on:
   workflow_dispatch:
@@ -11,22 +11,14 @@ on:
         required: true
 
 jobs:
-  build:
+  extract_romfs:
     runs-on: macos-26
-    timeout-minutes: 180
+    timeout-minutes: 60
 
     steps:
-      - name: Liberar espacio en el Mac de GitHub
+      - name: Instalar Python 3.14 y uv
         run: |
-          sudo rm -rf /Library/Developer/CoreSimulator
-          sudo rm -rf /Applications/Xcode_15* /Applications/Xcode_16* || true
-          sudo rm -rf ~/Library/Caches/*
-          df -h
-
-      - name: Instalar herramientas necesarias en el Mac
-        run: |
-          brew install opus libvpx python@3.14 xcodegen cmake ninja uv
-          xcodebuild -downloadComponent MetalToolchain || true
+          brew install opus libvpx python@3.14 uv
 
       - name: Descargar MacNativeGames
         run: |
@@ -41,29 +33,29 @@ jobs:
           /opt/homebrew/bin/uv tool run --from huggingface_hub hf download "$HF_REPO" pack.zip --repo-type dataset --local-dir datos --token "$HF_TOKEN"
           unzip datos/pack.zip -d datos/
           rm datos/pack.zip
-          ls -la datos/
 
-      - name: Parchear el script para que no pida cuenta de Apple (IPA sin firmar)
+      - name: Parar el script justo después de crear el romfs.bin de 15 GB (Paso 2/4)
         run: |
           cd MacNativeGames
-          find . -type f \( -name "*.py" -o -name "*.yml" -o -name "*.pbxproj" \) -exec sed -i '' 's/CODE_SIGNING_REQUIRED = YES/CODE_SIGNING_REQUIRED = NO/g' {} + || true
-          find . -type f -name "*.py" -exec sed -i '' 's/"xcodebuild"/"xcodebuild", "CODE_SIGN_IDENTITY=", "CODE_SIGNING_REQUIRED=NO", "CODE_SIGNING_ALLOWED=NO"/g' {} + || true
-
-      - name: Compilar Breath of the Wild para iOS
-        run: |
-          cd MacNativeGames
+          # Hacemos que el script termine con éxito justo cuando acabe el paso 2/4 data, sin compilar shaders
+          find . -type f -name "*.py" -exec sed -i '' 's/3\/4 shaders: building SPIRV-Cross/DONE_DATA_STOP/g' {} + || true
           
-          # OPCIÓN A: Si subiste un único archivo botw.xci (1.6.0 con update incluido)
-          # /opt/homebrew/bin/python3.14 build_app.py "../datos/botw.xci" -k "../datos/prod.keys" --firmware "../datos/firmware" --platform ios --ios-game-data documents -o "../Breath of the Wild.ipa"
-          
-          # OPCIÓN B: Si subiste base.nsp + update.nsp + DLCs (borra el # de abajo y ponle # al de arriba)
-          /opt/homebrew/bin/python3.14 build_app.py "../datos/base.nsp" -k "../datos/prod.keys" --update "../datos/update.nsp" --dlc "../datos/dlc1.nsp" --dlc "../datos/dlc2.nsp" --firmware "../datos/firmware" --platform ios --ios-game-data documents -o "../Breath of the Wild.ipa"
+          # Ejecutamos hasta que imprima DONE_DATA_STOP y en ese segundo cortamos para subir el archivo
+          (/opt/homebrew/bin/python3.14 build_app.py "../datos/base.nsp" -k "../datos/prod.keys" --update "../datos/update.nsp" --dlc "../datos/dlc1.nsp" --dlc "../datos/dlc2.nsp" --firmware "../datos/firmware" --platform ios --ios-game-data documents -o "../Breath of the Wild.ipa" 2>&1 | tee build.log &
+          PID=$!
+          while kill -0 $PID 2>/dev/null; do
+            if grep -q "3/4 shaders" build.log || grep -q "DONE_DATA_STOP" build.log; then
+              echo "RomFS de 15 GB e importación de DLCs terminados. Cortando compilación de shaders..."
+              kill -9 $PID || true
+              break
+            fi
+            sleep 5
+          done)
 
-      - name: Subir el IPA y el romfs.bin listos a tu Hugging Face
+      - name: Subir el romfs.bin de 15 GB y los DLCs a Hugging Face
         env:
           HF_TOKEN: ${{ github.event.inputs.hf_token }}
           HF_REPO: ${{ github.event.inputs.hf_repo }}
         run: |
-          /opt/homebrew/bin/uv tool run --from huggingface_hub hf upload "$HF_REPO" "Breath of the Wild.ipa" "Breath of the Wild.ipa" --repo-type dataset --token "$HF_TOKEN"
-          ROMFS_PATH=$(find datos -name "romfs.bin" | head -n 1)
-          /opt/homebrew/bin/uv tool run --from huggingface_hub hf upload "$HF_REPO" "$ROMFS_PATH" "romfs.bin" --repo-type dataset --token "$HF_TOKEN"
+          ls -lh datos/BotW_build/totk/extracted/botw160/romfs/romfs.bin
+          /opt/homebrew/bin/uv tool run --from huggingface_hub hf upload "$HF_REPO" "datos/BotW_build/totk/extracted/botw160/romfs/romfs.bin" "romfs.bin" --repo-type dataset --token "$HF_TOKEN"
