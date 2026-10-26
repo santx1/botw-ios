@@ -1,0 +1,71 @@
+name: Compilar BotW iOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      hf_token:
+        description: 'Tu Token de Hugging Face (con permiso Write)'
+        required: true
+      hf_repo:
+        description: 'Nombre de tu Dataset en HuggingFace (ej: tu_usuario/botw-archivos)'
+        required: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 180
+
+    steps:
+      - name: Liberar 60 GB de espacio en el Mac de GitHub
+        run: |
+          sudo rm -rf /Library/Developer/CoreSimulator
+          sudo rm -rf /Applications/Xcode_15* /Applications/Xcode_16* || true
+          sudo rm -rf ~/Library/Caches/*
+          df -h
+
+      - name: Instalar herramientas necesarias en el Mac
+        run: |
+          brew install opus libvpx python@3.14 xcodegen cmake ninja uv
+          pip3 install huggingface_hub --break-system-packages
+          xcodebuild -downloadComponent MetalToolchain || true
+
+      - name: Descargar MacNativeGames
+        run: |
+          git clone https://github.com/ly05010419/MacNativeGames.git
+          cd MacNativeGames
+
+      - name: Descargar tus archivos del juego desde Hugging Face
+        env:
+          HF_TOKEN: ${{ github.event.inputs.hf_token }}
+          HF_REPO: ${{ github.event.inputs.hf_repo }}
+        run: |
+          mkdir -p datos
+          huggingface-cli download "$HF_REPO" pack.zip --repo-type dataset --local-dir datos --token "$HF_TOKEN"
+          unzip datos/pack.zip -d datos/
+          rm datos/pack.zip
+
+      - name: Parchear el script para que no pida cuenta de Apple (IPA sin firmar)
+        run: |
+          cd MacNativeGames
+          # Evita que Xcode exija un certificado de desarrollador en el Mac de GitHub
+          find . -type f -name "*.py" -o -name "*.yml" -o -name "*.pbxproj" | xargs sed -i '' 's/CODE_SIGNING_REQUIRED = YES/CODE_SIGNING_REQUIRED = NO/g' || true
+          find . -type f -name "*.py" | xargs sed -i '' 's/"xcodebuild"/"xcodebuild", "CODE_SIGN_IDENTITY=", "CODE_SIGNING_REQUIRED=NO", "CODE_SIGNING_ALLOWED=NO"/g' || true
+
+      - name: Compilar Breath of the Wild para iOS
+        run: |
+          cd MacNativeGames
+          
+          # OPCIÓN A: Si subiste un único archivo botw.xci (1.6.0 con update incluido)
+          # /opt/homebrew/bin/python3.14 build_app.py "../datos/botw.xci" -k "../datos/prod.keys" --firmware "../datos/firmware" --platform ios --ios-game-data documents -o "../Breath of the Wild.ipa"
+          
+          # OPCIÓN B: Si subiste base.nsp + update.nsp + DLCs (borra el # de abajo y ponle # al de arriba)
+          /opt/homebrew/bin/python3.14 build_app.py "../datos/base.nsp" -k "../datos/prod.keys" --update "../datos/update.nsp" --dlc "../datos/dlc1.nsp" --dlc "../datos/dlc2.nsp" --firmware "../datos/firmware" --platform ios --ios-game-data documents -o "../Breath of the Wild.ipa"
+
+      - name: Subir el IPA y el romfs.bin listos a tu Hugging Face
+        env:
+          HF_TOKEN: ${{ github.event.inputs.hf_token }}
+          HF_REPO: ${{ github.event.inputs.hf_repo }}
+        run: |
+          huggingface-cli upload "$HF_REPO" "Breath of the Wild.ipa" "Breath of the Wild.ipa" --repo-type dataset --token "$HF_TOKEN"
+          ROMFS_PATH=$(find datos/BotW_build -name "romfs.bin" | head -n 1)
+          huggingface-cli upload "$HF_REPO" "$ROMFS_PATH" "romfs.bin" --repo-type dataset --token "$HF_TOKEN"
