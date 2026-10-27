@@ -31,7 +31,7 @@ jobs:
         run: |
           git clone https://github.com/ly05010419/MacNativeGames.git
 
-     - name: Descargar archivos del juego
+      - name: Descargar archivos del juego
         env:
           HF_TOKEN: ${{ github.event.inputs.hf_token }}
           HF_REPO: ${{ github.event.inputs.hf_repo }}
@@ -65,7 +65,7 @@ jobs:
           find . -type f \( -name "*.py" -o -name "*.yml" -o -name "*.pbxproj" \) -exec sed -i '' 's/CODE_SIGNING_REQUIRED = YES/CODE_SIGNING_REQUIRED = NO/g' {} + || true
           find . -type f -name "*.py" -exec sed -i '' 's/"xcodebuild"/"xcodebuild", "CODE_SIGN_IDENTITY=", "CODE_SIGNING_REQUIRED=NO", "CODE_SIGNING_ALLOWED=NO"/g' {} + || true
 
-      - name: Ejecutar compilación de shaders
+      - name: Ejecutar compilacion de shaders
         run: |
           cd MacNativeGames
           /opt/homebrew/bin/python3.14 build_app.py "../datos/base.nsp" -k "../datos/prod.keys" --update "../datos/update.nsp" --dlc "../datos/dlc1.nsp" --dlc "../datos/dlc2.nsp" --firmware "../datos/firmware" --platform ios --ios-game-data documents -o "../Breath of the Wild.ipa"
