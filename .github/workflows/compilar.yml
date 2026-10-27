@@ -31,13 +31,13 @@ jobs:
         run: |
           git clone https://github.com/ly05010419/MacNativeGames.git
 
-      - name: Descargar archivos del juego
+     - name: Descargar archivos del juego
         env:
           HF_TOKEN: ${{ github.event.inputs.hf_token }}
           HF_REPO: ${{ github.event.inputs.hf_repo }}
         run: |
           mkdir -p datos
-          /opt/homebrew/bin/python3.14 -c "
+          /opt/homebrew/bin/uv run --with huggingface_hub python -c "
           import os
           from huggingface_hub import hf_hub_download
 
