@@ -1,4 +1,37 @@
-- name: Descargar archivos del juego
+name: Compilar Shaders BotW
+
+on:
+  workflow_dispatch:
+    inputs:
+      hf_token:
+        description: 'Tu Token de Hugging Face (con permiso Write)'
+        required: true
+      hf_repo:
+        description: 'Nombre de tu Dataset en HuggingFace (ej: santx11/botw-ios)'
+        required: true
+
+jobs:
+  build_shaders:
+    runs-on: macos-26
+    timeout-minutes: 120
+
+    steps:
+      - name: Liberar espacio en el Mac de GitHub
+        run: |
+          sudo rm -rf /Library/Developer/CoreSimulator
+          sudo rm -rf /Applications/Xcode_15* /Applications/Xcode_16* || true
+          sudo rm -rf ~/Library/Caches/*
+
+      - name: Instalar herramientas necesarias
+        run: |
+          brew install opus libvpx python@3.14 xcodegen cmake ninja uv
+          xcodebuild -downloadComponent MetalToolchain || true
+
+      - name: Descargar MacNativeGames
+        run: |
+          git clone https://github.com/ly05010419/MacNativeGames.git
+
+      - name: Descargar archivos del juego
         env:
           HF_TOKEN: ${{ github.event.inputs.hf_token }}
           HF_REPO: ${{ github.event.inputs.hf_repo }}
@@ -25,3 +58,32 @@
           unzip -o -q datos/pack.zip -d datos/
           rm -f datos/pack.zip
           ls -la datos/
+
+      - name: Parchear firmas de Xcode
+        run: |
+          cd MacNativeGames
+          find . -type f \( -name "*.py" -o -name "*.yml" -o -name "*.pbxproj" \) -exec sed -i '' 's/CODE_SIGNING_REQUIRED = YES/CODE_SIGNING_REQUIRED = NO/g' {} + || true
+          find . -type f -name "*.py" -exec sed -i '' 's/"xcodebuild"/"xcodebuild", "CODE_SIGN_IDENTITY=", "CODE_SIGNING_REQUIRED=NO", "CODE_SIGNING_ALLOWED=NO"/g' {} + || true
+
+      - name: Ejecutar compilación de shaders
+        run: |
+          cd MacNativeGames
+          /opt/homebrew/bin/python3.14 build_app.py "../datos/base.nsp" -k "../datos/prod.keys" --update "../datos/update.nsp" --dlc "../datos/dlc1.nsp" --dlc "../datos/dlc2.nsp" --firmware "../datos/firmware" --platform ios --ios-game-data documents -o "../Breath of the Wild.ipa"
+
+      - name: Empaquetar y subir shader-cache
+        env:
+          HF_TOKEN: ${{ github.event.inputs.hf_token }}
+          HF_REPO: ${{ github.event.inputs.hf_repo }}
+        run: |
+          mkdir -p shaders_export
+          cp -r "$HOME/Library/Application Support/MacNativeGames/BotW/shader-cache"/* shaders_export/ 2>/dev/null || true
+          find datos/BotW_build -type d -name "shader-cache" -exec cp -r {}/* shaders_export/ \; 2>/dev/null || true
+          find datos/BotW_build -name "*seed*" -exec cp {} shaders_export/ \; 2>/dev/null || true
+          find datos/BotW_build -name "*.metallib" -exec cp {} shaders_export/ \; 2>/dev/null || true
+          
+          cd shaders_export
+          zip -r ../shader-cache.zip .
+          cd ..
+          
+          ls -lh shader-cache.zip
+          /opt/homebrew/bin/uv tool run --from huggingface_hub hf upload "$HF_REPO" "shader-cache.zip" "shader-cache.zip" --repo-type dataset --token "$HF_TOKEN"
