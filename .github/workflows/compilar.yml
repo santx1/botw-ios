@@ -58,12 +58,14 @@ jobs:
           unzip -o -q datos/pack.zip -d datos/
           rm -f datos/pack.zip
 
-      - name: Parchear firmas de Xcode
+      - name: Parchear firmas de Xcode y enlaces de shaders
         run: |
           cd MacNativeGames
           find . -type f \( -name "*.py" -o -name "*.yml" -o -name "*.pbxproj" \) -exec sed -i '' 's/CODE_SIGNING_REQUIRED = YES/CODE_SIGNING_REQUIRED = NO/g' {} + || true
           find . -type f -name "*.py" -exec sed -i '' 's/"xcodebuild"/"xcodebuild", "CODE_SIGN_IDENTITY=", "CODE_SIGNING_REQUIRED=NO", "CODE_SIGNING_ALLOWED=NO"/g' {} + || true
-
+          
+          # Reemplazar os.link por copia directa para evitar el error 92 en APFS
+          find . -type f -name "prepare_shader_seed.py" -exec sed -i '' "s/os.link(staging\/name, self.folder\/name)/__import__('shutil').copyfile(staging\/name, self.folder\/name)/g" {} +
       - name: Compilar juego y shaders
         run: |
           cd MacNativeGames
