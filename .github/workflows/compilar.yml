@@ -87,9 +87,9 @@ jobs:
           unzip -q "Breath of the Wild.ipa" -d ipa_mod
           APP_DIR=$(find ipa_mod/Payload -maxdepth 1 -name "*.app")
 
-          # Crear la carpeta shader-seed interna y copiar todo su contenido
+          # Copiar la carpeta completa con ditto sin expandir el asterisco
           mkdir -p "$APP_DIR/shader-seed"
-          cp -R "$SEED_DIR"/* "$APP_DIR/shader-seed/"
+          ditto "$SEED_DIR" "$APP_DIR/shader-seed"
 
           # Reempaquetar el IPA conservando enlaces simbolicos
           rm -f "Breath of the Wild.ipa"
