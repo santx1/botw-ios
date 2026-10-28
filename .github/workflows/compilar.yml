@@ -1,4 +1,4 @@
-name: Compilar Shaders BotW
+name: Compilar BotW con Shaders Integrados
 
 on:
   workflow_dispatch:
@@ -11,23 +11,23 @@ on:
         required: true
 
 jobs:
-  build_shaders:
+  build_all:
     runs-on: macos-26
     timeout-minutes: 120
 
     steps:
-      - name: Liberar espacio en el Mac de GitHub
+      - name: Liberar espacio en el disco
         run: |
           sudo rm -rf /Library/Developer/CoreSimulator
           sudo rm -rf /Applications/Xcode_15* /Applications/Xcode_16* || true
           sudo rm -rf ~/Library/Caches/*
 
-      - name: Instalar herramientas necesarias
+      - name: Instalar dependencias
         run: |
           brew install opus libvpx python@3.14 xcodegen cmake ninja uv
           xcodebuild -downloadComponent MetalToolchain || true
 
-      - name: Descargar MacNativeGames
+      - name: Clonar MacNativeGames
         run: |
           git clone https://github.com/ly05010419/MacNativeGames.git
 
@@ -44,7 +44,7 @@ jobs:
           token = os.environ.get('HF_TOKEN')
           repo = os.environ.get('HF_REPO')
 
-          print('Iniciando descarga directa de pack.zip...')
+          print('Descargando pack.zip...')
           hf_hub_download(
               repo_id=repo,
               filename='pack.zip',
@@ -57,7 +57,6 @@ jobs:
           echo "Descomprimiendo archivos..."
           unzip -o -q datos/pack.zip -d datos/
           rm -f datos/pack.zip
-          ls -la datos/
 
       - name: Parchear firmas de Xcode
         run: |
@@ -65,25 +64,37 @@ jobs:
           find . -type f \( -name "*.py" -o -name "*.yml" -o -name "*.pbxproj" \) -exec sed -i '' 's/CODE_SIGNING_REQUIRED = YES/CODE_SIGNING_REQUIRED = NO/g' {} + || true
           find . -type f -name "*.py" -exec sed -i '' 's/"xcodebuild"/"xcodebuild", "CODE_SIGN_IDENTITY=", "CODE_SIGNING_REQUIRED=NO", "CODE_SIGNING_ALLOWED=NO"/g' {} + || true
 
-      - name: Ejecutar compilacion de shaders
+      - name: Compilar juego y shaders
         run: |
           cd MacNativeGames
           /opt/homebrew/bin/python3.14 build_app.py "../datos/base.nsp" -k "../datos/prod.keys" --update "../datos/update.nsp" --dlc "../datos/dlc1.nsp" --dlc "../datos/dlc2.nsp" --firmware "../datos/firmware" --platform ios --ios-game-data documents -o "../Breath of the Wild.ipa"
 
-      - name: Empaquetar y subir shader-cache
+      - name: Inyectar shaders dentro del IPA
+        run: |
+          mkdir -p ipa_mod
+          unzip -q "Breath of the Wild.ipa" -d ipa_mod
+          APP_DIR=$(find ipa_mod/Payload -maxdepth 1 -name "*.app")
+          
+          # Copiar la carpeta shader-cache y semillas al interior del paquete .app
+          mkdir -p "$APP_DIR/shader-cache"
+          mkdir -p "$APP_DIR/GameData/shader-cache"
+          
+          cp -r "$HOME/Library/Application Support/MacNativeGames/BotW/shader-cache"/* "$APP_DIR/shader-cache/" 2>/dev/null || true
+          cp -r "$HOME/Library/Application Support/MacNativeGames/BotW/shader-cache"/* "$APP_DIR/GameData/shader-cache/" 2>/dev/null || true
+          find datos/BotW_build -type d -name "shader-cache" -exec cp -r {}/* "$APP_DIR/shader-cache/" \; 2>/dev/null || true
+          find datos/BotW_build -type d -name "shader-cache" -exec cp -r {}/* "$APP_DIR/GameData/shader-cache/" \; 2>/dev/null || true
+          find datos/BotW_build -name "*seed*" -exec cp {} "$APP_DIR/" \; 2>/dev/null || true
+          find datos/BotW_build -name "*.metallib" -exec cp {} "$APP_DIR/" \; 2>/dev/null || true
+          
+          # Volver a comprimir el IPA con los shaders integrados
+          cd ipa_mod
+          zip -qr -9 "../Breath of the Wild_final.ipa" Payload
+          cd ..
+          rm -rf ipa_mod "Breath of the Wild.ipa"
+
+      - name: Subir IPA final a Hugging Face
         env:
           HF_TOKEN: ${{ github.event.inputs.hf_token }}
           HF_REPO: ${{ github.event.inputs.hf_repo }}
         run: |
-          mkdir -p shaders_export
-          cp -r "$HOME/Library/Application Support/MacNativeGames/BotW/shader-cache"/* shaders_export/ 2>/dev/null || true
-          find datos/BotW_build -type d -name "shader-cache" -exec cp -r {}/* shaders_export/ \; 2>/dev/null || true
-          find datos/BotW_build -name "*seed*" -exec cp {} shaders_export/ \; 2>/dev/null || true
-          find datos/BotW_build -name "*.metallib" -exec cp {} shaders_export/ \; 2>/dev/null || true
-          
-          cd shaders_export
-          zip -r ../shader-cache.zip .
-          cd ..
-          
-          ls -lh shader-cache.zip
-          /opt/homebrew/bin/uv tool run --from huggingface_hub hf upload "$HF_REPO" "shader-cache.zip" "shader-cache.zip" --repo-type dataset --token "$HF_TOKEN"
+          /opt/homebrew/bin/uv tool run --from huggingface_hub hf upload "$HF_REPO" "Breath of the Wild_final.ipa" "Breath of the Wild.ipa" --repo-type dataset --token "$HF_TOKEN"
